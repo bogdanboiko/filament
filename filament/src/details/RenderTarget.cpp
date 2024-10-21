@@ -156,15 +156,16 @@ RenderTarget* RenderTarget::Builder::build(Engine& engine) {
 // ------------------------------------------------------------------------------------------------
 
 FRenderTarget::FRenderTarget(FEngine& engine, const RenderTarget::Builder& builder)
-    : mSupportedColorAttachmentsCount(engine.getDriverApi().getMaxDrawBuffers()) {
-
+    : mSupportedColorAttachmentsCount(engine.getDriverApi().getMaxDrawBuffers()),
+      mSupportsReadPixels(false) {
     std::copy(std::begin(builder.mImpl->mAttachments), std::end(builder.mImpl->mAttachments),
             std::begin(mAttachments));
 
     backend::MRT mrt{};
     TargetBufferInfo dinfo{};
 
-    auto setAttachment = [&](TargetBufferInfo& info, AttachmentPoint attachmentPoint) {
+    auto setAttachment = [this, &driver = engine.getDriverApi()]
+            (TargetBufferInfo& info, AttachmentPoint attachmentPoint) {
         Attachment const& attachment = mAttachments[(size_t)attachmentPoint];
         auto t = downcast(attachment.texture);
         info.handle = t->getHwHandle();
@@ -174,6 +175,7 @@ FRenderTarget::FRenderTarget(FEngine& engine, const RenderTarget::Builder& build
         } else {
             info.layer = attachment.layer;
         }
+        t->updateLodRange(info.level);
     };
 
     UTILS_NOUNROLL
@@ -186,6 +188,16 @@ FRenderTarget::FRenderTarget(FEngine& engine, const RenderTarget::Builder& build
             if (any(attachment.texture->getUsage() &
                     (TextureUsage::SAMPLEABLE | Texture::Usage::SUBPASS_INPUT))) {
                 mSampleableAttachmentsMask |= targetBufferBit;
+            }
+
+            // readPixels() only applies to the color attachment that binds at index 0.
+            if (i == 0 && any(attachment.texture->getUsage() & TextureUsage::COLOR_ATTACHMENT)) {
+
+                // TODO: the following will be changed to
+                //    mSupportsReadPixels =
+                //            any(attachment.texture->getUsage() & TextureUsage::BLIT_SRC);
+                //    in a later filament version when clients have properly added the right usage.
+                mSupportsReadPixels = attachment.texture->hasBlitSrcUsage();
             }
         }
     }
